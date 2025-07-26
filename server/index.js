@@ -6,9 +6,25 @@ require('dotenv').config();
 
 const app = express();
 
-app.use(cors({ origin: 'https://secure-file-storage-five.vercel.app' }));
+const allowedOrigins = ['http://localhost:3000', 'https://secure-file-storage-five.vercel.app'];
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+  }
+}));
+
 app.use(express.json());
 app.use(fileUpload());
+
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ status: 'OK', message: 'Server is running' });
+});
 
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/files', require('./routes/files'));
