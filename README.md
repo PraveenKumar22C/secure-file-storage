@@ -78,12 +78,27 @@ express-fileupload, AWS S3 SDK
 ### Running in Production
 - For the backend:
   ```bash
-  npm run start
+  npm run dev
   ```
 - For the frontend:
   ```bash
   npm run build
-  npm run start
+  npm run dev
+  ```
+### Production Git Repo and URL's
+- Github(main):
+  ```bash
+ https://github.com/PraveenKumar22C/secure-file-storage
+  ```
+
+- For the backend:
+  ```bash
+  https://secure-file-storage-d6cz.onrender.com
+  ```
+
+- For the frontend:
+  ```bash
+ https://secure-file-storage-five.vercel.app
   ```
 
 ## API Documentation
@@ -283,8 +298,10 @@ PORT=5000
 ### `.env.local.example` (Frontend)
 ```env
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=<your-google-client-id>
-NEXT_BASE_URL=http://localhost:5000/api
+NEXT_PUBLIC_API_URL=http://localhost:5000/api
 ```
+
+
 
 ## Notes
 - Ensure MongoDB, AWS S3, and Google OAuth credentials are correctly configured before running the application.

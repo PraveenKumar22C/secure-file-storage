@@ -9,7 +9,7 @@ const nextConfig: NextConfig = {
   },
   reactStrictMode: false,
   env: {
-    NEXT_BASE_URL: process.env.NEXT_BASE_URL,
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
     NEXT_PUBLIC_GOOGLE_CLIENT_ID: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
   },
 };
