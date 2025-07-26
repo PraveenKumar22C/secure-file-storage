@@ -25,37 +25,45 @@ JWT, Google OAuth2
 ## File Handling: 
 express-fileupload, AWS S3 SDK
 
+
 ### Installation
 
 1. **Clone the Repository**
+   ```bash
    git clone <repository-url>
    cd <repository-folder>
+   ```
 
 2. **Set Up the Backend**
    - Navigate to the backend directory:
+     ```bash
      cd backend
-
+     ```
    - Install dependencies:
+     ```bash
      npm install
-
+     ```
    - Create a `.env` file in the `backend` directory based on the `.env.example` (see below).
-
    - Start the backend server:
+     ```bash
      npm run dev
+     ```
      The backend will run on `http://localhost:5000` by default.
 
 3. **Set Up the Frontend**
    - Navigate to the frontend directory:
+     ```bash
      cd frontend
-
+     ```
    - Install dependencies:
+     ```bash
      npm install
-
+     ```
    - Create a `.env.local` file in the `frontend` directory based on the `.env.local.example` (see below).
-
    - Start the frontend development server:
+     ```bash
      npm run dev
-
+     ```
      The frontend will run on `http://localhost:3000` by default.
 
 4. **Configure Environment Variables**
@@ -69,33 +77,36 @@ express-fileupload, AWS S3 SDK
 
 ### Running in Production
 - For the backend:
-
-  npm run dev
-
+  ```bash
+  npm run start
+  ```
 - For the frontend:
-
+  ```bash
   npm run build
-  npm run dev
+  npm run start
+  ```
 
 ## API Documentation
 
 The backend provides RESTful API endpoints for authentication and file/folder management.
 
 ### Base URL
+```
 http://localhost:5000/api
+```
 
 ### Authentication Endpoints (`/api/auth`)
 
 #### `POST /register`
 - **Description**: Register a new user with username, email, and password.
-
 - **Request Body**:
+  ```json
   {
     "username": "string",
     "email": "string",
     "password": "string"
   }
-
+  ```
 - **Responses**:
   - `200`: `{ accessToken: string, refreshToken: string }`
   - `400`: `{ message: "Username or email already exists" }`
@@ -103,13 +114,13 @@ http://localhost:5000/api
 
 #### `POST /login`
 - **Description**: Log in a user with username/email and password.
-
 - **Request Body**:
+  ```json
   {
     "identifier": "string",
     "password": "string"
   }
-
+  ```
 - **Responses**:
   - `200`: `{ accessToken: string, refreshToken: string }`
   - `400`: `{ message: "Invalid credentials" | "Account uses Google login" }`
@@ -118,6 +129,7 @@ http://localhost:5000/api
 #### `POST /google`
 - **Description**: Log in or register a user via Google OAuth.
 - **Request Body**:
+  ```json
   {
     "token": "string"
   }
@@ -130,9 +142,11 @@ http://localhost:5000/api
 #### `POST /refresh-token`
 - **Description**: Refresh an access token using a refresh token.
 - **Request Body**:
+  ```json
   {
     "refreshToken": "string"
   }
+  ```
 - **Responses**:
   - `200`: `{ accessToken: string }`
   - `401`: `{ message: "No refresh token" | "Refresh token invalidated" | "Invalid refresh token" }`
@@ -141,9 +155,11 @@ http://localhost:5000/api
 #### `POST /logout`
 - **Description**: Log out a user by invalidating the refresh token.
 - **Request Body**:
+  ```json
   {
     "refreshToken": "string"
   }
+  ```
 - **Responses**:
   - `200`: `{ message: "Logged out successfully" }`
   - `500`: `{ message: "Server error" }`
@@ -155,10 +171,12 @@ http://localhost:5000/api
 #### `POST /folders`
 - **Description**: Create a new folder.
 - **Request Body**:
+  ```json
   {
     "name": "string",
     "parentId": "string" // optional
   }
+  ```
 - **Responses**:
   - `201`: `{ folder: object }`
   - `400`: `{ message: "Folder name is required" }`
@@ -241,7 +259,7 @@ http://localhost:5000/api
 ## Sample Environment Files
 
 ### `.env.example` (Backend)
-
+```env
 # MongoDB Connection URI
 MONGO_URI=mongodb+srv://<username>:<password>@<cluster-url>/?retryWrites=true&w=majority&appName=<app-name>
 
@@ -260,10 +278,13 @@ GOOGLE_CLIENT_SECRET=<your-google-client-secret>
 
 # Server Port
 PORT=5000
+```
 
 ### `.env.local.example` (Frontend)
+```env
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=<your-google-client-id>
 NEXT_BASE_URL=http://localhost:5000/api
+```
 
 ## Notes
 - Ensure MongoDB, AWS S3, and Google OAuth credentials are correctly configured before running the application.
