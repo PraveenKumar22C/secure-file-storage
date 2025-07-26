@@ -1,4 +1,3 @@
-
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
@@ -21,9 +20,10 @@ const buttonVariants = {
 interface RecentProps {
   onFolderClick: (folderName: string, folderId: string) => void;
   onRefresh: () => void;
+  fileTypeFilter?: string;
 }
 
-export default function Recent({ onFolderClick, onRefresh }: RecentProps) {
+export default function Recent({ onFolderClick, onRefresh, fileTypeFilter = 'all' }: RecentProps) {
   const [items, setItems] = useState<(File | TypeFolder)[]>([]);
   const [error, setError] = useState('');
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -53,7 +53,7 @@ export default function Recent({ onFolderClick, onRefresh }: RecentProps) {
     }
 
     try {
-      const data = await fetchRecentFiles(accessToken, 10);
+      const data = await fetchRecentFiles(accessToken, 10, fileTypeFilter);
       setItems(data);
 
       const folders = data.filter((item) => !('contentType' in item)) as TypeFolder[];
@@ -68,7 +68,7 @@ export default function Recent({ onFolderClick, onRefresh }: RecentProps) {
         try {
           const newAccessToken = await refreshAccessToken(localStorage.getItem('refreshToken') || '');
           localStorage.setItem('accessToken', newAccessToken);
-          const data = await fetchRecentFiles(newAccessToken, 10);
+          const data = await fetchRecentFiles(newAccessToken, 10, fileTypeFilter);
           setItems(data);
 
           const folders = data.filter((item) => !('contentType' in item)) as TypeFolder[];
@@ -85,7 +85,7 @@ export default function Recent({ onFolderClick, onRefresh }: RecentProps) {
         setError(err.response?.data?.message || 'Failed to fetch recent files');
       }
     }
-  }, [fetchFolderSize, folderSizes]);
+  }, [fetchFolderSize, folderSizes, fileTypeFilter]);
 
   const handleDelete = async () => {
     if (!itemToDelete) return;
@@ -224,7 +224,7 @@ export default function Recent({ onFolderClick, onRefresh }: RecentProps) {
 
   useEffect(() => {
     fetchRecentItems();
-  }, [fetchRecentItems, onRefresh]);
+  }, [fetchRecentItems, onRefresh, fileTypeFilter]);
 
   const getItemIcon = (item: File | TypeFolder) => {
     if ('contentType' in item) {

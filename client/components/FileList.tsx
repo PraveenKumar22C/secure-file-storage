@@ -7,6 +7,7 @@ import { ApiError, ApiErrorResponse, File, TypeFolder, FileListProps } from '@/t
 import { FileText, ImageIcon, Trash2, Folder, Search, FolderOpen, Download } from 'lucide-react';
 import { useInView } from 'react-intersection-observer';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { debounce } from 'lodash';
 
 const rowVariants = {
   hidden: { opacity: 0, y: 10 },
@@ -20,10 +21,11 @@ const buttonVariants = {
 
 interface ExtendedFileListProps extends FileListProps {
   searchQuery?: string;
+  fileTypeFilter?: string;
 }
 
 interface SearchResult extends File {
-  folderPath?: string; 
+  folderPath?: string;
 }
 
 interface FolderSearchResult extends TypeFolder {
@@ -37,6 +39,7 @@ export default function FileList({
   onFolderClick,
   onRefresh,
   searchQuery = '',
+  fileTypeFilter = 'all',
 }: ExtendedFileListProps) {
   const [files, setFiles] = useState<(File | TypeFolder)[]>([]);
   const [allFiles, setAllFiles] = useState<(File | TypeFolder)[]>([]);
@@ -48,52 +51,53 @@ export default function FileList({
   const [itemToDelete, setItemToDelete] = useState<{ id: string; isFolder: boolean; name: string } | null>(null);
   const [folderSizes, setFolderSizes] = useState<{ [key: string]: number }>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
   const { ref, inView } = useInView();
 
   const searchFilesRecursively = useCallback(
     async (folderId: string | null, query: string, accessToken: string, folderPath: string = ''): Promise<SearchItem[]> => {
       try {
-        const items = await fetchFiles(accessToken, folderId, 1, 100); 
+        const items = await fetchFiles(accessToken, folderId, 1, 100, fileTypeFilter);
         const results: SearchItem[] = [];
-        
+
         for (const item of items) {
           const itemName = 'contentType' in item ? item.filename : item.name;
           const currentPath = folderPath ? `${folderPath}/${itemName}` : itemName;
-          
+
           if (itemName.toLowerCase().includes(query.toLowerCase())) {
             if ('contentType' in item) {
               results.push({
                 ...item,
-                folderPath: folderPath || 'Root'
+                folderPath: folderPath || 'Root',
               } as SearchResult);
             } else {
               results.push({
                 ...item,
-                folderPath: folderPath || 'Root'
+                folderPath: folderPath || 'Root',
               } as FolderSearchResult);
             }
           }
-          
+
           if (!('contentType' in item)) {
             const subResults = await searchFilesRecursively(item._id, query, accessToken, currentPath);
             results.push(...subResults);
           }
         }
-        
+
         return results;
       } catch (error) {
         console.error(`Failed to search in folder ${folderId}:`, error);
         return [];
       }
     },
-    []
+    [fileTypeFilter]
   );
 
   const fetchFolderSize = useCallback(
     async (folderId: string, accessToken: string) => {
       try {
-        const folderContents = await fetchFiles(accessToken, folderId, 1);
+        const folderContents = await fetchFiles(accessToken, folderId, 1, 100, 'all');
         const totalSize = folderContents
           .filter((item) => 'size' in item)
           .reduce((sum, item) => sum + (('size' in item && item.size) || 0), 0);
@@ -109,12 +113,14 @@ export default function FileList({
     async (query: string) => {
       if (!query.trim()) {
         setSearchResults([]);
+        setIsSearching(false);
         return;
       }
 
       const accessToken = localStorage.getItem('accessToken');
       if (!accessToken) {
         setError('Please log in to search files');
+        setIsSearching(false);
         return;
       }
 
@@ -149,12 +155,14 @@ export default function FileList({
       const accessToken = localStorage.getItem('accessToken');
       if (!accessToken) {
         setError('Please log in to view files');
+        setInitialLoading(false);
+        setIsLoading(false);
         return;
       }
 
       setIsLoading(true);
       try {
-        const data = await fetchFiles(accessToken, currentFolderId, pageNum);
+        const data = await fetchFiles(accessToken, currentFolderId, pageNum, 20, fileTypeFilter);
         if (pageNum === 1) {
           setAllFiles(data);
         } else {
@@ -174,7 +182,7 @@ export default function FileList({
           try {
             const newAccessToken = await refreshAccessToken(localStorage.getItem('refreshToken') || '');
             localStorage.setItem('accessToken', newAccessToken);
-            const data = await fetchFiles(newAccessToken, currentFolderId, pageNum);
+            const data = await fetchFiles(newAccessToken, currentFolderId, pageNum, 20, fileTypeFilter);
             if (pageNum === 1) {
               setAllFiles(data);
             } else {
@@ -197,29 +205,50 @@ export default function FileList({
         }
       } finally {
         setIsLoading(false);
+        setInitialLoading(false);
       }
     },
-    [currentFolderId, fetchFolderSize, folderSizes]
+    [currentFolderId, fetchFolderSize, folderSizes, fileTypeFilter]
+  );
+
+  const debouncedFetchFilesList = useMemo(
+    () => debounce((pageNum: number) => fetchFilesList(pageNum), 300),
+    [fetchFilesList]
   );
 
   useEffect(() => {
+    setInitialLoading(true);
+    setError('');
+    setPage(1);
+    setAllFiles([]);
+    setFiles([]);
+    setSearchResults([]);
+
     if (searchQuery.trim()) {
       performSearch(searchQuery);
     } else {
-      setSearchResults([]);
+      fetchFilesList(1);
     }
-  }, [searchQuery, performSearch]);
 
-  const displayedFiles = useMemo(() => {
-    if (searchQuery.trim()) {
-      return searchResults;
-    }
-    return allFiles;
-  }, [searchQuery, searchResults, allFiles]);
+    return () => {
+      debouncedFetchFilesList.cancel();
+    };
+  }, [currentFolderId, fileTypeFilter, searchQuery, performSearch, fetchFilesList, debouncedFetchFilesList]);
 
   useEffect(() => {
-    setFiles(displayedFiles);
-  }, [displayedFiles]);
+    if (inView && hasMore && !isLoading && !searchQuery.trim()) {
+      setPage((prev) => prev + 1);
+      debouncedFetchFilesList(page + 1);
+    }
+  }, [inView, hasMore, isLoading, page, debouncedFetchFilesList, searchQuery]);
+
+  useEffect(() => {
+    if (searchQuery.trim()) {
+      setFiles(searchResults);
+    } else {
+      setFiles(allFiles);
+    }
+  }, [searchResults, allFiles, searchQuery]);
 
   const handleDelete = async () => {
     if (!itemToDelete) return;
@@ -296,14 +325,14 @@ export default function FileList({
         return;
       }
       const { url, filename } = await downloadFile(fileId, accessToken);
-      
+
       const response = await fetch(url, {
         method: 'GET',
         headers: {
-          'Accept': 'application/octet-stream', 
+          'Accept': 'application/octet-stream',
         },
       });
-      
+
       if (!response.ok) {
         throw new Error('Failed to fetch file');
       }
@@ -316,7 +345,7 @@ export default function FileList({
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl); 
+      window.URL.revokeObjectURL(blobUrl);
     } catch (error) {
       const err = error as AxiosError<ApiErrorResponse>;
       if (err.response?.status === 401) {
@@ -324,14 +353,14 @@ export default function FileList({
           const newAccessToken = await refreshAccessToken(localStorage.getItem('refreshToken') || '');
           localStorage.setItem('accessToken', newAccessToken);
           const { url, filename } = await downloadFile(fileId, newAccessToken);
-          
+
           const response = await fetch(url, {
             method: 'GET',
             headers: {
               'Accept': 'application/octet-stream',
             },
           });
-          
+
           if (!response.ok) {
             throw new Error('Failed to fetch file');
           }
@@ -359,35 +388,6 @@ export default function FileList({
     setItemToDelete({ id, isFolder, name });
     setIsDeleteModalOpen(true);
   };
-
-  useEffect(() => {
-    if (!searchQuery.trim()) {
-      setPage(1);
-      setError('');
-      setAllFiles([]);
-      setFiles([]);
-      fetchFilesList(1);
-    }
-  }, [currentFolderId, fetchFilesList, searchQuery]);
-
-  useEffect(() => {
-    if (!searchQuery.trim()) {
-      setPage(1);
-      setError('');
-      setAllFiles([]);
-      setFiles([]);
-      fetchFilesList(1);
-    } else {
-      performSearch(searchQuery);
-    }
-  }, [fetchFilesList, onRefresh, performSearch, searchQuery]);
-
-  useEffect(() => {
-    if (inView && hasMore && !isLoading && !searchQuery.trim()) {
-      setPage((prev) => prev + 1);
-      fetchFilesList(page + 1);
-    }
-  }, [inView, hasMore, page, fetchFilesList, isLoading, searchQuery]);
 
   const getItemIcon = (item: File | TypeFolder | SearchItem) => {
     if ('contentType' in item) {
@@ -440,6 +440,15 @@ export default function FileList({
   };
 
   const displayMessage = getDisplayMessage();
+
+  if (initialLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px]">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+        <p className="text-gray-600 mt-2">Loading files...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4 min-h-[400px]">
@@ -496,106 +505,104 @@ export default function FileList({
 
       {files.length > 0 && (
         <div className="overflow-x-auto">
-       <table className="w-full text-left bg-white rounded-lg shadow-sm border border-gray-200 min-h-[200px]">
-    <thead>
-      <tr className="bg-gray-50 text-gray-700 border-b border-gray-200">
-        <th className="p-4 font-semibold">Name</th>
-        {searchQuery.trim() && <th className="p-4 font-semibold">Location</th>}
-        <th className="p-4 font-semibold">Size</th>
-        <th className="p-4 font-semibold">Uploaded</th>
-        <th className="p-4 font-semibold">Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      {files.map((item, index) => (
-        <motion.tr
-          key={item._id}
-          variants={rowVariants}
-          initial="hidden"
-          animate="visible"
-          transition={{ delay: index * 0.05 }}
-          className="border-b border-gray-100 hover:bg-gray-50 transition-colors duration-150"
-        >
-          <td className="p-4">
-            <div className="flex items-center space-x-3"> 
-              {getItemIcon(item)}
-              {'contentType' in item ? (
-                <a
-                  href={item.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-600 hover:underline font-medium truncate" 
+          <table className="w-full text-left bg-white rounded-lg shadow-sm border border-gray-200 min-h-[200px]">
+            <thead>
+              <tr className="bg-gray-50 text-gray-700 border-b border-gray-200">
+                <th className="p-4 font-semibold">Name</th>
+                {searchQuery.trim() && <th className="p-4 font-semibold">Location</th>}
+                <th className="p-4 font-semibold">Size</th>
+                <th className="p-4 font-semibold">Uploaded</th>
+                <th className="p-4 font-semibold">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {files.map((item, index) => (
+                <motion.tr
+                  key={item._id}
+                  variants={rowVariants}
+                  initial="hidden"
+                  animate="visible"
+                  transition={{ delay: index * 0.05 }}
+                  className="border-b border-gray-100 hover:bg-gray-50 transition-colors duration-150"
                 >
-                  {highlightSearchTerm(item.filename, searchQuery)}
-                </a>
-              ) : (
-                <button
-                  onClick={() => onFolderClick(item.name, item._id)}
-                  className="text-blue-600 hover:underline font-medium text-left truncate"
-                >
-                  {highlightSearchTerm(item.name, searchQuery)}
-                </button>
-              )}
-            </div>
-          </td>
-          {searchQuery.trim() && (
-            <td className="p-4 text-gray-600">
-              <div className="flex items-center space-x-2">
-                <FolderOpen className="h-4 w-4 text-gray-400" />
-                <span className="text-sm truncate"> {/* Added truncate */}
-                  {String('folderPath' in item ? item.folderPath : 'Root')}
-                </span>
-              </div>
-            </td>
-          )}
-          <td className="p-4 text-gray-600">
-            {'size' in item ? (
-              `${(item.size / 1024).toFixed(2)} KB`
-            ) : folderSizes[item._id] ? (
-              `${(folderSizes[item._id] / 1024).toFixed(2)} KB`
-            ) : (
-              <span className="text-gray-400 text-sm">Calculating...</span>
-            )}
-          </td>
-          <td className="p-4 text-gray-600">
-            {new Date('createdAt' in item ? item.createdAt : item.uploadTime).toLocaleString()}
-          </td>
-          <td className="p-4">
-            <div className="flex space-x-2"> {/* Ensure flex container for buttons */}
-              {'contentType' in item && (
-                <motion.button
-                  variants={buttonVariants}
-                  whileHover="hover"
-                  whileTap="tap"
-                  onClick={() => handleDownload(item._id)}
-                  className="flex items-center space-x-1 px-3 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors duration-200 border border-blue-200"
-                  title="Download file"
-                >
-                  <Download className="h-4 w-4" />
-                </motion.button>
-              )}
-              <motion.button
-                variants={buttonVariants}
-                whileHover="hover"
-                whileTap="tap"
-                onClick={() =>
-                  openDeleteModal(
-                    item._id,
-                    'contentType' in item ? false : true,
-                    'contentType' in item ? item.filename : item.name
-                  )
-                }
-                className="flex items-center space-x-1 px-3 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors duration-200 border border-red-200"
-                title={`Delete ${'contentType' in item ? 'file' : 'folder'}`}
-              >
-                <Trash2 className="h-4 w-4" />
-              </motion.button>
-            </div>
-          </td>
-        </motion.tr>
-      ))}
-    </tbody>
-  </table>
+                  <td className="p-4">
+                    <div className="flex items-center space-x-3">
+                      {getItemIcon(item)}
+                      {'contentType' in item ? (
+                        <a
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline font-medium truncate cursor-pointer"
+                        >
+                          {highlightSearchTerm(item.filename, searchQuery)}
+                        </a>
+                      ) : (
+                        <button
+                          onClick={() => onFolderClick(item.name, item._id)}
+                          className="text-blue-600 hover:underline font-medium text-left truncate cursor-pointer"
+                        >
+                          {highlightSearchTerm(item.name, searchQuery)}
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                  {searchQuery.trim() && (
+                    <td className="p-4 text-gray-600">
+                      <div className="flex items-center space-x-2">
+                        <FolderOpen className="h-4 w-4 text-gray-400" />
+                        <span className="text-sm truncate">{String('folderPath' in item ? item.folderPath : 'Root')}</span>
+                      </div>
+                    </td>
+                  )}
+                  <td className="p-4 text-gray-600">
+                    {'size' in item ? (
+                      `${(item.size / 1024).toFixed(2)} KB`
+                    ) : folderSizes[item._id] ? (
+                      `${(folderSizes[item._id] / 1024).toFixed(2)} KB`
+                    ) : (
+                      <span className="text-gray-400 text-sm">Calculating...</span>
+                    )}
+                  </td>
+                  <td className="p-4 text-gray-600">
+                    {new Date('createdAt' in item ? item.createdAt : item.uploadTime).toLocaleString()}
+                  </td>
+                  <td className="p-4">
+                    <div className="flex space-x-2">
+                      {'contentType' in item && (
+                        <motion.button
+                          variants={buttonVariants}
+                          whileHover="hover"
+                          whileTap="tap"
+                          onClick={() => handleDownload(item._id)}
+                          className="flex items-center space-x-1 px-3 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors duration-200 border border-blue-200 cursor-pointer"
+                          title="Download file"
+                        >
+                          <Download className="h-4 w-4" />
+                        </motion.button>
+                      )}
+                      <motion.button
+                        variants={buttonVariants}
+                        whileHover="hover"
+                        whileTap="tap"
+                        onClick={() =>
+                          openDeleteModal(
+                            item._id,
+                            'contentType' in item ? false : true,
+                            'contentType' in item ? item.filename : item.name
+                          )
+                        }
+                        className="flex items-center space-x-1 px-3 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors duration-200 border border-red-200 cursor-pointer"
+                        title={`Delete ${'contentType' in item ? 'file' : 'folder'}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </motion.button>
+                    </div>
+                  </td>
+                </motion.tr>
+              ))}
+            </tbody>
+          </table>
 
           {hasMore && !searchQuery.trim() && (
             <div ref={ref} className="h-10 flex items-center justify-center mt-4">
@@ -633,7 +640,7 @@ export default function FileList({
                 setIsDeleteModalOpen(false);
                 setItemToDelete(null);
               }}
-              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors duration-200 border border-gray-300"
+              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors duration-200 border border-gray-300 cursor-pointer"
             >
               Cancel
             </motion.button>
@@ -642,7 +649,7 @@ export default function FileList({
               whileHover="hover"
               whileTap="tap"
               onClick={handleDelete}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-red-500"
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-red-500 cursor-pointer"
             >
               Delete
             </motion.button>

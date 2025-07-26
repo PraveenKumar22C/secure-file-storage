@@ -3,12 +3,11 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, Variants } from "framer-motion";
 import { AxiosError } from "axios";
-import { createFolder, refreshAccessToken } from "@/lib/api";
+import { createFolder, refreshAccessToken,logout } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import FileUpload from "@/components/FileUpload";
 import FileList from "@/components/FileList";
 import Recent from "@/components/Recent";
-import { logoutUser } from "@/lib/auth";
 import {
   Home,
   Upload,
@@ -35,6 +34,13 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ApiError, ApiErrorResponse } from "@/types";
 
 const sidebarVariants: Variants = {
@@ -62,6 +68,11 @@ const buttonVariants: Variants = {
   tap: { scale: 0.95, transition: { duration: 0.1 } },
 };
 
+const modalVariants: Variants = {
+  hidden: { opacity: 0, scale: 0.95 },
+  visible: { opacity: 1, scale: 1, transition: { duration: 0.3, ease: [0.4, 0.0, 0.2, 1] } },
+};
+
 export default function Dashboard() {
   const router = useRouter();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -73,11 +84,14 @@ export default function Dashboard() {
   ]);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [isSearching, setIsSearching] = useState(false);
+  const [fileTypeFilter, setFileTypeFilter] = useState<string>("all");
+  const [userName, setUserName] = useState<string>("User");
 
   useEffect(() => {
     setIsSearching(true);
@@ -91,6 +105,13 @@ export default function Dashboard() {
     };
   }, [searchTerm]);
 
+  useEffect(() => {
+    const storedUserName = localStorage.getItem("username");
+    if (storedUserName) {
+      setUserName(storedUserName);
+    }
+  }, []);
+
   const handleRefresh = useCallback(() => {
     setRefreshTrigger((prev) => prev + 1);
   }, []);
@@ -101,13 +122,22 @@ export default function Dashboard() {
     }
   }, [router]);
 
-  const handleLogout = async () => {
+  const handleLogout = () => {
+    setIsLogoutModalOpen(true);
+  };
+
+  const confirmLogout = async () => {
     try {
-      await logoutUser();
+      const refreshToken = localStorage.getItem("refreshToken") || "";
+      await logout(refreshToken);
+      localStorage.clear();
       router.push("/login");
     } catch (error) {
       console.error("Logout failed:", error);
+      localStorage.clear();
       router.push("/login");
+    } finally {
+      setIsLogoutModalOpen(false);
     }
   };
 
@@ -120,6 +150,7 @@ export default function Dashboard() {
     setIsRecentView(false);
     setSearchTerm("");
     setDebouncedSearchTerm("");
+    setFileTypeFilter("all");
   };
 
   const handleBreadcrumbClick = (index: number) => {
@@ -127,12 +158,14 @@ export default function Dashboard() {
     setIsRecentView(false);
     setSearchTerm("");
     setDebouncedSearchTerm("");
+    setFileTypeFilter("all");
   };
 
   const handleRecentClick = () => {
     setIsRecentView(true);
     setSearchTerm("");
     setDebouncedSearchTerm("");
+    setFileTypeFilter("all");
   };
 
   const handleDashboardClick = () => {
@@ -140,6 +173,7 @@ export default function Dashboard() {
     setCurrentPath([{ name: "Home", id: null }]);
     setSearchTerm("");
     setDebouncedSearchTerm("");
+    setFileTypeFilter("all");
   };
 
   const clearSearch = () => {
@@ -229,19 +263,18 @@ export default function Dashboard() {
             whileHover="hover"
             whileTap="tap"
             onClick={toggleSidebar}
-            className={`p-2 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors duration-200 ${
+            className={`p-2 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors duration-200 cursor-pointer ${
               isSidebarCollapsed ? "mt-4" : ""
             }`}
           >
             {isSidebarCollapsed ? (
-                <Image
+              <Image
                 src="/assets/logo.png"
                 alt="Logo"
                 width={40}
                 height={40}
                 className="mr-2"
               />
-
             ) : (
               <ChevronLeft className="h-6 w-6" />
             )}
@@ -255,7 +288,7 @@ export default function Dashboard() {
             onClick={handleRecentClick}
             className={`flex items-center ${
               isSidebarCollapsed ? "justify-center" : "justify-start"
-            } w-full text-left p-3 rounded-lg transition-all duration-200 ${
+            } w-full text-left p-3 rounded-lg transition-all duration-200 cursor-pointer ${
               isRecentView
                 ? "text-blue-600 bg-blue-50"
                 : "text-gray-600 hover:text-blue-600 hover:bg-blue-50"
@@ -272,7 +305,7 @@ export default function Dashboard() {
             onClick={handleDashboardClick}
             className={`flex items-center ${
               isSidebarCollapsed ? "justify-center" : "justify-start"
-            } w-full text-left p-3 rounded-lg transition-all duration-200 ${
+            } w-full text-left p-3 rounded-lg transition-all duration-200 cursor-pointer ${
               !isRecentView
                 ? "text-blue-600 bg-blue-50"
                 : "text-gray-600 hover:text-blue-600 hover:bg-blue-50"
@@ -289,7 +322,7 @@ export default function Dashboard() {
             onClick={() => setIsUploadModalOpen(true)}
             className={`flex items-center ${
               isSidebarCollapsed ? "justify-center" : "justify-start"
-            } text-gray-600 hover:text-blue-600 hover:bg-blue-50 w-full text-left p-3 rounded-lg transition-all duration-200`}
+            } text-gray-600 hover:text-blue-600 hover:bg-blue-50 w-full text-left p-3 rounded-lg transition-all duration-200 cursor-pointer`}
             title={isSidebarCollapsed ? "Upload Files" : ""}
           >
             <Upload className="h-6 w-6 shrink-0" />
@@ -302,7 +335,7 @@ export default function Dashboard() {
             onClick={() => setIsFolderModalOpen(true)}
             className={`flex items-center ${
               isSidebarCollapsed ? "justify-center" : "justify-start"
-            } text-gray-600 hover:text-blue-600 hover:bg-blue-50 w-full text-left p-3 rounded-lg transition-all duration-200`}
+            } text-gray-600 hover:text-blue-600 hover:bg-blue-50 w-full text-left p-3 rounded-lg transition-all duration-200 cursor-pointer`}
             title={isSidebarCollapsed ? "New Folder" : ""}
           >
             <FolderPlus className="h-6 w-6 shrink-0" />
@@ -315,7 +348,7 @@ export default function Dashboard() {
             onClick={handleLogout}
             className={`flex items-center ${
               isSidebarCollapsed ? "justify-center" : "justify-start"
-            } text-gray-600 hover:text-red-600 hover:bg-red-50 w-full text-left p-3 rounded-lg transition-all duration-200`}
+            } text-gray-600 hover:text-red-600 hover:bg-red-50 w-full text-left p-3 rounded-lg transition-all duration-200 cursor-pointer`}
             title={isSidebarCollapsed ? "Logout" : ""}
           >
             <LogOut className="h-6 w-6 shrink-0" />
@@ -369,6 +402,7 @@ export default function Dashboard() {
             <Recent
               onFolderClick={handleFolderClick}
               onRefresh={handleRefresh}
+              fileTypeFilter={fileTypeFilter}
             />
           ) : (
             <Card className="bg-white shadow-xl border-none rounded-2xl">
@@ -380,44 +414,100 @@ export default function Dashboard() {
                   Manage your files with ease and security.
                 </p>
 
-                <div className="relative mt-4 max-w-md">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <Search className="h-5 w-5 text-gray-400" />
-                  </div>
-                  <Input
-                    type="text"
-                    placeholder="Search files and folders..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10 pr-10 border-gray-300 focus:border-blue-500 focus:ring-blue-500 transition-all duration-200"
-                  />
-                  {searchTerm && (
-                    <button
-                      onClick={clearSearch}
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center"
-                    >
-                      <X className="h-5 w-5 text-gray-400 hover:text-gray-600 transition-colors" />
-                    </button>
-                  )}
-                  {isSearching && (
-                    <div className="absolute right-10 inset-y-0 flex items-center">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                <div className="flex flex-col sm:flex-row gap-4 mt-4 max-w-md">
+                  <div className="relative flex-1">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Search className="h-5 w-5 text-gray-400" />
                     </div>
-                  )}
+                    <Input
+                      type="text"
+                      placeholder="Search files and folders..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-10 pr-10 border-gray-300 focus:border-blue-500 focus:ring-blue-500 transition-all duration-200 rounded-lg bg-gray-50/50 text-gray-800 placeholder-gray-400 focus:outline-none"
+                    />
+                    {searchTerm && (
+                      <button
+                        onClick={clearSearch}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center cursor-pointer"
+                      >
+                        <X className="h-5 w-5 text-gray-400 hover:text-gray-600 transition-colors duration-200" />
+                      </button>
+                    )}
+                    {isSearching && (
+                      <div className="absolute right-10 inset-y-0 flex items-center">
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                      </div>
+                    )}
+                  </div>
+                  <Select
+                    value={fileTypeFilter}
+                    onValueChange={(value) => setFileTypeFilter(value)}
+                  >
+                    <SelectTrigger className="w-[180px] border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 rounded-lg bg-gray-50/50 text-gray-800 transition-all duration-200 ease-in-out hover:bg-gray-100 cursor-pointer">
+                      <SelectValue placeholder="Filter by type" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white border border-gray-200 rounded-lg shadow-lg">
+                      <SelectItem
+                        value="all"
+                        className="px-4 py-2 text-gray-800 hover:bg-blue-50 hover:text-blue-600 transition-colors duration-200 cursor-pointer"
+                      >
+                        All Files
+                      </SelectItem>
+                      <SelectItem
+                        value="image"
+                        className="px-4 py-2 text-gray-800 hover:bg-blue-50 hover:text-blue-600 transition-colors duration-200 cursor-pointer"
+                      >
+                        Images
+                      </SelectItem>
+                      <SelectItem
+                        value="pdf"
+                        className="px-4 py-2 text-gray-800 hover:bg-blue-50 hover:text-blue-600 transition-colors duration-200 cursor-pointer"
+                      >
+                        PDFs
+                      </SelectItem>
+                      <SelectItem
+                        value="document"
+                        className="px-4 py-2 text-gray-800 hover:bg-blue-50 hover:text-blue-600 transition-colors duration-200 cursor-pointer"
+                      >
+                        Documents
+                      </SelectItem>
+                      <SelectItem
+                        value="other"
+                        className="px-4 py-2 text-gray-800 hover:bg-blue-50 hover:text-blue-600 transition-colors duration-200 cursor-pointer"
+                      >
+                        Others
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="min-h-[24px] mt-2">
-                  {debouncedSearchTerm && (
+                  {(debouncedSearchTerm || fileTypeFilter !== "all") && (
                     <motion.div
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.3 }}
                       className="text-sm text-gray-600"
                     >
-                      Searching for:{" "}
-                      <span className="font-medium">
-                        &quot;{debouncedSearchTerm}&quot;
-                      </span>
+                      {debouncedSearchTerm && (
+                        <>
+                          Searching for:{" "}
+                          <span className="font-medium">
+                            &quot;{debouncedSearchTerm}&quot;
+                          </span>
+                        </>
+                      )}
+                      {debouncedSearchTerm && fileTypeFilter !== "all" && " | "}
+                      {fileTypeFilter !== "all" && (
+                        <>
+                          Filtered by:{" "}
+                          <span className="font-medium">
+                            {fileTypeFilter.charAt(0).toUpperCase() +
+                              fileTypeFilter.slice(1)}
+                          </span>
+                        </>
+                      )}
                     </motion.div>
                   )}
                 </div>
@@ -430,6 +520,7 @@ export default function Dashboard() {
                   onFolderClick={handleFolderClick}
                   onRefresh={handleRefresh}
                   searchQuery={debouncedSearchTerm}
+                  fileTypeFilter={fileTypeFilter}
                 />
               </CardContent>
             </Card>
@@ -459,7 +550,7 @@ export default function Dashboard() {
               whileHover="hover"
               whileTap="tap"
               onClick={() => setIsUploadModalOpen(false)}
-              className="px-4 py-2 bg-red-600 text-white border border-red-700 rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500/50 transition-all duration-200 ease-in-out"
+              className="px-4 py-2 bg-red-600 text-white border border-red-700 rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500/50 transition-all duration-200 ease-in-out cursor-pointer"
             >
               Cancel
             </motion.button>
@@ -512,7 +603,7 @@ export default function Dashboard() {
                 setFolderName("");
                 setError("");
               }}
-              className="px-4 py-2 bg-red-600 text-white border border-red-700 rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500/50 transition-all duration-200 ease-in-out"
+              className="px-4 py-2 bg-red-600 text-white border border-red-700 rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500/50 transition-all duration-200 ease-in-out cursor-pointer"
             >
               Cancel
             </motion.button>
@@ -522,7 +613,7 @@ export default function Dashboard() {
               whileTap="tap"
               onClick={handleCreateFolder}
               disabled={!folderName.trim()}
-              className={`px-4 py-2 rounded-lg text-white transition-all duration-200 ease-in-out focus:outline-none ${
+              className={`px-4 py-2 rounded-lg text-white transition-all duration-200 ease-in-out focus:outline-none cursor-pointer ${
                 folderName.trim()
                   ? "bg-blue-600 hover:bg-blue-700 focus:ring-2 focus:ring-blue-500/50"
                   : "bg-gray-400 cursor-not-allowed opacity-70"
@@ -531,6 +622,42 @@ export default function Dashboard() {
               Create Folder
             </motion.button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isLogoutModalOpen} onOpenChange={setIsLogoutModalOpen}>
+        <DialogContent className="sm:max-w-md bg-white rounded-2xl shadow-2xl border border-gray-200 p-6">
+          <motion.div variants={modalVariants} initial="hidden" animate="visible">
+            <DialogHeader>
+              <DialogTitle className="text-2xl font-bold text-gray-800">Confirm Logout</DialogTitle>
+            </DialogHeader>
+            <div className="py-4">
+              <p className="text-gray-600 text-base">
+                <span className="font-semibold text-gray-800">{userName}</span>, are you sure you want to log out?
+              </p>
+              <p className="text-sm text-gray-500 mt-2">You will be signed out of your account, and all local data will be cleared.</p>
+            </div>
+            <DialogFooter className="flex justify-end space-x-3">
+              <motion.button
+                variants={buttonVariants}
+                whileHover="hover"
+                whileTap="tap"
+                onClick={() => setIsLogoutModalOpen(false)}
+                className="px-4 py-2 bg-gray-100 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-400/50 transition-all duration-200 ease-in-out cursor-pointer"
+              >
+                Cancel
+              </motion.button>
+              <motion.button
+                variants={buttonVariants}
+                whileHover="hover"
+                whileTap="tap"
+                onClick={confirmLogout}
+                className="px-4 py-2 bg-red-600 text-white border border-red-700 rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500/50 transition-all duration-200 ease-in-out cursor-pointer"
+              >
+                Logout
+              </motion.button>
+            </DialogFooter>
+          </motion.div>
         </DialogContent>
       </Dialog>
     </div>

@@ -1,4 +1,3 @@
-
 const express = require('express');
 const mongoose = require('mongoose');
 const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
@@ -16,6 +15,54 @@ const s3Client = new S3Client({
 
 const File = require('../models/File');
 const Folder = require('../models/Folder');
+
+async function folderContainsFileType(folderId, userId, fileTypeFilter) {
+  const fileQuery = { userId, folderId };
+  if (fileTypeFilter !== 'all') {
+    if (fileTypeFilter === 'image') {
+      fileQuery.contentType = { $regex: '^image/', $options: 'i' };
+    } else if (fileTypeFilter === 'pdf') {
+      fileQuery.contentType = 'application/pdf';
+    } else if (fileTypeFilter === 'document') {
+      fileQuery.contentType = {
+        $in: [
+          'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'text/plain',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ],
+      };
+    } else if (fileTypeFilter === 'other') {
+      fileQuery.contentType = {
+        $nin: [
+          /^image\//,
+          'application/pdf',
+          'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'text/plain',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ],
+      };
+    }
+  }
+
+  const files = await File.find(fileQuery).limit(1);
+  if (files.length > 0) {
+    return true;
+  }
+
+  const subFolders = await Folder.find({ parentId: folderId, userId });
+  for (const subFolder of subFolders) {
+    const hasMatchingFiles = await folderContainsFileType(subFolder._id, userId, fileTypeFilter);
+    if (hasMatchingFiles) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 // Create a new folder
 router.post('/folders', auth, async (req, res) => {
@@ -103,22 +150,69 @@ router.post('/upload', auth, async (req, res) => {
 // Get files and folders
 router.get('/', auth, async (req, res) => {
   try {
-    const { folderId, page = 1, limit = 20 } = req.query;
-    const query = { userId: req.user.userId };
-    if (folderId) {
-      query.folderId = folderId;
+    const { folderId, page = 1, limit = 20, fileTypeFilter = 'all' } = req.query;
+    console.log('Fetching files with params:', { folderId, page, limit, fileTypeFilter });
+
+    const fileQuery = { userId: req.user.userId };
+    if (folderId && folderId !== 'null') {
+      fileQuery.folderId = folderId;
     } else {
-      query.folderId = null;
+      fileQuery.folderId = null;
     }
 
-    const files = await File.find(query)
+    if (fileTypeFilter !== 'all') {
+      if (fileTypeFilter === 'image') {
+        fileQuery.contentType = { $regex: '^image/', $options: 'i' };
+      } else if (fileTypeFilter === 'pdf') {
+        fileQuery.contentType = 'application/pdf';
+      } else if (fileTypeFilter === 'document') {
+        fileQuery.contentType = {
+          $in: [
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'text/plain',
+            'application/vnd.ms-excel',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          ],
+        };
+      } else if (fileTypeFilter === 'other') {
+        fileQuery.contentType = {
+          $nin: [
+            /^image\//,
+            'application/pdf',
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'text/plain',
+            'application/vnd.ms-excel',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          ],
+        };
+      }
+    }
+
+    const files = await File.find(fileQuery)
       .sort({ uploadTime: -1 })
-      .skip((page - 1) * limit)
+      .skip((parseInt(page) - 1) * parseInt(limit))
       .limit(parseInt(limit));
-    const folders = await Folder.find({ userId: req.user.userId, parentId: folderId || null })
+
+    const folderQuery = { userId: req.user.userId, parentId: folderId || null };
+    const allFolders = await Folder.find(folderQuery)
       .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
+      .skip((parseInt(page) - 1) * parseInt(limit))
       .limit(parseInt(limit));
+
+    let folders = allFolders;
+    if (fileTypeFilter !== 'all') {
+      folders = [];
+      for (const folder of allFolders) {
+        const hasMatchingFiles = await folderContainsFileType(folder._id, req.user.userId, fileTypeFilter);
+        if (hasMatchingFiles) {
+          folders.push(folder);
+        }
+      }
+    }
+
+    console.log('Files fetched:', files.length, 'Folders fetched:', folders.length);
     res.json({ files, folders });
   } catch (error) {
     console.error('Error fetching files and folders:', error);
@@ -129,13 +223,62 @@ router.get('/', auth, async (req, res) => {
 // Get recent files and folders
 router.get('/recent', auth, async (req, res) => {
   try {
-    const { limit = 10 } = req.query;
-    const files = await File.find({ userId: req.user.userId, folderId: null })
+    const { limit = 10, fileTypeFilter = 'all' } = req.query;
+    console.log('Fetching recent files with params:', { limit, fileTypeFilter });
+
+    const fileQuery = { userId: req.user.userId };
+
+    if (fileTypeFilter !== 'all') {
+      if (fileTypeFilter === 'image') {
+        fileQuery.contentType = { $regex: '^image/', $options: 'i' };
+      } else if (fileTypeFilter === 'pdf') {
+        fileQuery.contentType = 'application/pdf';
+      } else if (fileTypeFilter === 'document') {
+        fileQuery.contentType = {
+          $in: [
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'text/plain',
+            'application/vnd.ms-excel',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          ],
+        };
+      } else if (fileTypeFilter === 'other') {
+        fileQuery.contentType = {
+          $nin: [
+            /^image\//,
+            'application/pdf',
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'text/plain',
+            'application/vnd.ms-excel',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          ],
+        };
+      }
+    }
+
+    const files = await File.find(fileQuery)
       .sort({ uploadTime: -1 })
       .limit(parseInt(limit));
-    const folders = await Folder.find({ userId: req.user.userId, parentId: null })
+
+    const folderQuery = { userId: req.user.userId, parentId: null };
+    const allFolders = await Folder.find(folderQuery)
       .sort({ createdAt: -1 })
       .limit(parseInt(limit));
+
+    let folders = allFolders;
+    if (fileTypeFilter !== 'all') {
+      folders = [];
+      for (const folder of allFolders) {
+        const hasMatchingFiles = await folderContainsFileType(folder._id, req.user.userId, fileTypeFilter);
+        if (hasMatchingFiles) {
+          folders.push(folder);
+        }
+      }
+    }
+
+    console.log('Recent files fetched:', files.length, 'Recent folders fetched:', folders.length);
     res.json([...folders, ...files]);
   } catch (error) {
     console.error('Error fetching recent files and folders:', error);

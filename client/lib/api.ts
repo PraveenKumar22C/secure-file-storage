@@ -92,14 +92,15 @@ export const fetchFiles = async (
   accessToken: string,
   folderId: string | null,
   page: number = 1,
-  limit: number = 20
+  limit: number = 20,
+  fileTypeFilter: string = 'all'
 ): Promise<(File | TypeFolder)[]> => {
   try {
     const response = await api.get<{ files: File[]; folders: TypeFolder[] }>('/files', {
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
-      params: { folderId, page, limit },
+      params: { folderId, page, limit, fileTypeFilter },
     });
     return [...response.data.folders, ...response.data.files];
   } catch (error) {
@@ -109,13 +110,17 @@ export const fetchFiles = async (
   }
 };
 
-export const fetchRecentFiles = async (accessToken: string, limit: number = 10): Promise<(File | TypeFolder)[]> => {
+export const fetchRecentFiles = async (
+  accessToken: string,
+  limit: number = 10,
+  fileTypeFilter: string = 'all'
+): Promise<(File | TypeFolder)[]> => {
   try {
-    console.log('Fetching recent files with URL:', `${API_URL}/files/recent?limit=${limit}`);
+    console.log('Fetching recent files with URL:', `${API_URL}/files/recent?limit=${limit}&fileTypeFilter=${fileTypeFilter}`);
     console.log('Access Token:', accessToken ? 'Present' : 'Missing');
     const response = await api.get<(File | TypeFolder)[]>('/files/recent', {
       headers: { Authorization: `Bearer ${accessToken}` },
-      params: { limit },
+      params: { limit, fileTypeFilter },
     });
     console.log('Recent files response:', response.data);
     return response.data;
