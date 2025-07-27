@@ -51,6 +51,7 @@ export default function FileList({
   const [itemToDelete, setItemToDelete] = useState<{ id: string; isFolder: boolean; name: string } | null>(null);
   const [folderSizes, setFolderSizes] = useState<{ [key: string]: number }>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
   const { ref, inView } = useInView();
 
@@ -122,6 +123,7 @@ export default function FileList({
         console.log('Empty search query, resetting search results');
         setSearchResults([]);
         setIsSearching(false);
+        setInitialLoading(false); // Ensure initialLoading is reset
         return;
       }
 
@@ -129,6 +131,7 @@ export default function FileList({
       if (!accessToken) {
         setError('Please log in to search files');
         setIsSearching(false);
+        setInitialLoading(false);
         return;
       }
 
@@ -161,6 +164,7 @@ export default function FileList({
         }
       } finally {
         setIsSearching(false);
+        setInitialLoading(false); // Ensure initialLoading is reset
       }
     },
     [searchFilesRecursively]
@@ -171,6 +175,7 @@ export default function FileList({
       const accessToken = localStorage.getItem('accessToken');
       if (!accessToken) {
         setError('Please log in to view files');
+        setInitialLoading(false);
         setIsLoading(false);
         return;
       }
@@ -229,6 +234,7 @@ export default function FileList({
         }
       } finally {
         setIsLoading(false);
+        setInitialLoading(false);
       }
     },
     [currentFolderId, fetchFolderSize, folderSizes, fileTypeFilter]
@@ -241,6 +247,7 @@ export default function FileList({
 
   useEffect(() => {
     console.log('useEffect triggered with searchQuery:', searchQuery, 'fileTypeFilter:', fileTypeFilter, 'currentFolderId:', currentFolderId);
+    setInitialLoading(true);
     setError('');
     setPage(1);
     setAllFiles([]);
@@ -465,6 +472,14 @@ export default function FileList({
 
   const displayMessage = getDisplayMessage();
 
+  if (initialLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px]">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+        <p className="text-gray-600 mt-2">Loading files...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4 min-h-[400px]">
