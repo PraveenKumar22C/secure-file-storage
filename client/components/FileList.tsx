@@ -224,7 +224,7 @@ export default function FileList({
         console.log('[fetchFilesList] Completed, isLoading:', false, 'initialLoading:', false);
       }
     },
-    [currentFolderId, fileTypeFilter, folderSizes, fetchFolderSize]
+    [currentFolderId, fileTypeFilter, fetchFolderSize]
   );
 
   const debouncedFetchFilesList = useMemo(
@@ -252,7 +252,7 @@ export default function FileList({
       console.log('[Initial Fetch useEffect] Cleanup');
       debouncedFetchFilesList.cancel();
     };
-  }, [currentFolderId, fileTypeFilter, searchQuery, performSearch, fetchFilesList, debouncedFetchFilesList]);
+  }, [currentFolderId, fileTypeFilter, searchQuery, performSearch, fetchFilesList]);
 
   useEffect(() => {
     if (inView && hasMore && !isLoading && !searchQuery.trim() && !initialLoading) {
