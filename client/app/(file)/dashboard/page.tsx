@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, Variants } from "framer-motion";
 import { AxiosError } from "axios";
-import { createFolder, refreshAccessToken,logout } from "@/lib/api";
+import { createFolder, refreshAccessToken, logout } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import FileUpload from "@/components/FileUpload";
 import FileList from "@/components/FileList";
@@ -514,14 +514,25 @@ export default function Dashboard() {
               </CardHeader>
 
               <CardContent className="space-y-8">
-                <FileList
-                  key={refreshTrigger}
-                  currentFolderId={currentPath[currentPath.length - 1].id}
-                  onFolderClick={handleFolderClick}
-                  onRefresh={handleRefresh}
-                  searchQuery={debouncedSearchTerm}
-                  fileTypeFilter={fileTypeFilter}
-                />
+                <div className="relative">
+                  <FileList
+                    key={refreshTrigger}
+                    currentFolderId={currentPath[currentPath.length - 1].id}
+                    onFolderClick={handleFolderClick}
+                    onRefresh={handleRefresh}
+                    searchQuery={debouncedSearchTerm}
+                    fileTypeFilter={fileTypeFilter}
+                  />
+                  {isSearching && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="absolute inset-0 flex items-center justify-center bg-white/50 backdrop-blur-sm rounded-lg"
+                    >
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                    </motion.div>
+                  )}
+                </div>
               </CardContent>
             </Card>
           )}

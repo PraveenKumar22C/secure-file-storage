@@ -55,10 +55,14 @@ export default function FileList({
   const [isSearching, setIsSearching] = useState(false);
   const { ref, inView } = useInView();
 
+  // Timeout utility for API calls
+  const timeout = (ms: number) => new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out')), ms));
+
   const searchFilesRecursively = useCallback(
     async (folderId: string | null, query: string, accessToken: string, folderPath: string = ''): Promise<SearchItem[]> => {
       try {
-        const items = await fetchFiles(accessToken, folderId, 1, 100, fileTypeFilter);
+        console.log(`Searching in folder ${folderId || 'Root'} with query: ${query}`);
+        const items = await Promise.race([fetchFiles(accessToken, folderId, 1, 100, fileTypeFilter), timeout(10000)]) as (File | TypeFolder)[];
         const results: SearchItem[] = [];
 
         for (const item of items) {
@@ -80,14 +84,18 @@ export default function FileList({
           }
 
           if (!('contentType' in item)) {
-            const subResults = await searchFilesRecursively(item._id, query, accessToken, currentPath);
+            const subResults = await Promise.race([
+              searchFilesRecursively(item._id, query, accessToken, currentPath),
+              timeout(10000),
+            ]) as SearchItem[];
             results.push(...subResults);
           }
         }
 
+        console.log(`Search results for folder ${folderId || 'Root'}:`, results);
         return results;
       } catch (error) {
-        console.error(`Failed to search in folder ${folderId}:`, error);
+        console.error(`Failed to search in folder ${folderId || 'Root'}:`, error);
         return [];
       }
     },
@@ -97,7 +105,7 @@ export default function FileList({
   const fetchFolderSize = useCallback(
     async (folderId: string, accessToken: string) => {
       try {
-        const folderContents = await fetchFiles(accessToken, folderId, 1, 100, 'all');
+        const folderContents = await Promise.race([fetchFiles(accessToken, folderId, 1, 100, 'all'), timeout(10000)]) as (File | TypeFolder)[];
         const totalSize = folderContents
           .filter((item) => 'size' in item)
           .reduce((sum, item) => sum + (('size' in item && item.size) || 0), 0);
@@ -112,8 +120,10 @@ export default function FileList({
   const performSearch = useCallback(
     async (query: string) => {
       if (!query.trim()) {
+        console.log('Empty search query, resetting search results');
         setSearchResults([]);
         setIsSearching(false);
+        setInitialLoading(false); // Ensure initialLoading is reset
         return;
       }
 
@@ -121,30 +131,40 @@ export default function FileList({
       if (!accessToken) {
         setError('Please log in to search files');
         setIsSearching(false);
+        setInitialLoading(false);
         return;
       }
 
       setIsSearching(true);
       try {
-        const results = await searchFilesRecursively(null, query, accessToken);
-        setSearchResults(results);
+        const results = await Promise.race([searchFilesRecursively(null, query, accessToken), timeout(15000)]) as SearchItem[];
+        console.log('Search completed with results:', results);
+        setSearchResults(results as SearchItem[]);
+        setError('');
       } catch (error) {
         const err = error as AxiosError<ApiErrorResponse>;
+        console.error('Search error:', err);
         if (err.response?.status === 401) {
           try {
-            const newAccessToken = await refreshAccessToken(localStorage.getItem('refreshToken') || '');
-            localStorage.setItem('accessToken', newAccessToken);
-            const results = await searchFilesRecursively(null, query, newAccessToken);
-            setSearchResults(results);
+            const newAccessToken = await Promise.race([
+              refreshAccessToken(localStorage.getItem('refreshToken') || ''),
+              timeout(10000),
+            ]);
+            localStorage.setItem('accessToken', String(newAccessToken));
+            const results = await Promise.race([searchFilesRecursively(null, query, String(newAccessToken)), timeout(15000)]);
+            console.log('Search completed after token refresh:', results);
+            setSearchResults(results as SearchItem[]);
+            setError('');
           } catch (refreshErr) {
             const refreshError = refreshErr as ApiError;
             setError(refreshError.response?.data?.message || 'Session expired. Please log in again.');
           }
         } else {
-          setError('Failed to search files');
+          setError(err.message || 'Failed to search files');
         }
       } finally {
         setIsSearching(false);
+        setInitialLoading(false); // Ensure initialLoading is reset
       }
     },
     [searchFilesRecursively]
@@ -162,13 +182,14 @@ export default function FileList({
 
       setIsLoading(true);
       try {
-        const data = await fetchFiles(accessToken, currentFolderId, pageNum, 20, fileTypeFilter);
+        const data = await Promise.race([fetchFiles(accessToken, currentFolderId, pageNum, 20, fileTypeFilter), timeout(10000)]) as (File | TypeFolder)[];
+        console.log(`Fetched files for page ${pageNum}:`, data);
         if (pageNum === 1) {
-          setAllFiles(data);
+          setAllFiles(data as (File | TypeFolder)[]);
         } else {
-          setAllFiles((prev) => [...prev, ...data]);
+          setAllFiles((prev) => [...prev, ...(data as (File | TypeFolder)[])]);
         }
-        setHasMore(data.length === 20);
+        setHasMore((data as (File | TypeFolder)[]).length === 20);
 
         const folders = data.filter((item) => !('contentType' in item)) as TypeFolder[];
         for (const folder of folders) {
@@ -178,22 +199,30 @@ export default function FileList({
         }
       } catch (error) {
         const err = error as AxiosError<ApiErrorResponse>;
+        console.error('Fetch files error:', err);
         if (err.response?.status === 401) {
           try {
-            const newAccessToken = await refreshAccessToken(localStorage.getItem('refreshToken') || '');
-            localStorage.setItem('accessToken', newAccessToken);
-            const data = await fetchFiles(newAccessToken, currentFolderId, pageNum, 20, fileTypeFilter);
+            const newAccessToken = await Promise.race([
+              refreshAccessToken(localStorage.getItem('refreshToken') || ''),
+              timeout(10000),
+            ]);
+            localStorage.setItem('accessToken', String(newAccessToken));
+            const data = await Promise.race([
+              fetchFiles(String(newAccessToken), currentFolderId, pageNum, 20, fileTypeFilter),
+              timeout(10000),
+            ]);
             if (pageNum === 1) {
-              setAllFiles(data);
+              setAllFiles(data as (File | TypeFolder)[]);
             } else {
-              setAllFiles((prev) => [...prev, ...data]);
+              setAllFiles((prev) => [...prev, ...(data as (File | TypeFolder)[])]);
             }
-            setHasMore(data.length === 20);
+            const typedData = data as (File | TypeFolder)[];
+            setHasMore(typedData.length === 20);
 
-            const folders = data.filter((item) => !('contentType' in item)) as TypeFolder[];
+            const folders = typedData.filter((item) => !('contentType' in item)) as TypeFolder[];
             for (const folder of folders) {
               if (!folderSizes[folder._id]) {
-                await fetchFolderSize(folder._id, newAccessToken);
+                await fetchFolderSize(folder._id, String(newAccessToken));
               }
             }
           } catch (refreshErr) {
@@ -201,7 +230,7 @@ export default function FileList({
             setError(refreshError.response?.data?.message || 'Session expired. Please log in again.');
           }
         } else {
-          setError(err.response?.data?.message || 'Failed to fetch files');
+          setError(err.message || 'Failed to fetch files');
         }
       } finally {
         setIsLoading(false);
@@ -217,6 +246,7 @@ export default function FileList({
   );
 
   useEffect(() => {
+    console.log('useEffect triggered with searchQuery:', searchQuery, 'fileTypeFilter:', fileTypeFilter, 'currentFolderId:', currentFolderId);
     setInitialLoading(true);
     setError('');
     setPage(1);
@@ -243,6 +273,7 @@ export default function FileList({
   }, [inView, hasMore, isLoading, page, debouncedFetchFilesList, searchQuery]);
 
   useEffect(() => {
+    console.log('Updating files with searchResults:', searchResults, 'allFiles:', allFiles);
     if (searchQuery.trim()) {
       setFiles(searchResults);
     } else {
@@ -422,14 +453,14 @@ export default function FileList({
     }
 
     if (error) {
-      return null;
+      return error; // Display error message
     }
 
     if (searchQuery.trim()) {
-      if (files.length === 0) {
+      if (searchResults.length === 0) {
         return `No files or folders found matching "${searchQuery}"`;
       }
-      return `Found ${files.length} result${files.length === 1 ? '' : 's'} for "${searchQuery}"`;
+      return `Found ${searchResults.length} result${searchResults.length === 1 ? '' : 's'} for "${searchQuery}"`;
     }
 
     if (files.length === 0) {
@@ -456,7 +487,7 @@ export default function FileList({
         <h3 className="text-xl font-semibold text-gray-800">
           {searchQuery.trim() ? 'Search Results' : 'Your Files and Folders'}
         </h3>
-        {searchQuery.trim() && files.length > 0 && (
+        {searchQuery.trim() && searchResults.length > 0 && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -464,7 +495,7 @@ export default function FileList({
             className="flex items-center text-sm text-gray-600"
           >
             <Search className="h-4 w-4 mr-1" />
-            {files.length} result{files.length === 1 ? '' : 's'}
+            {searchResults.length} result{searchResults.length === 1 ? '' : 's'}
           </motion.div>
         )}
       </div>
@@ -486,11 +517,11 @@ export default function FileList({
           animate={{ opacity: 1 }}
           transition={{ duration: 0.3 }}
           className={`text-center py-8 ${
-            searchQuery.trim() && files.length === 0 ? 'text-gray-500' : 'text-gray-600'
+            searchQuery.trim() && searchResults.length === 0 ? 'text-gray-500' : 'text-gray-600'
           }`}
         >
           <div className="flex flex-col items-center space-y-2">
-            {searchQuery.trim() && files.length === 0 ? (
+            {searchQuery.trim() && searchResults.length === 0 ? (
               <>
                 <Search className="h-12 w-12 text-gray-400" />
                 <p className="text-lg font-medium">{displayMessage}</p>
