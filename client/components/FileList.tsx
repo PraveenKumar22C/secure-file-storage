@@ -117,153 +117,165 @@ export default function FileList({
     []
   );
 
-  const performSearch = useCallback(
-    async (query: string) => {
-      if (!query.trim()) {
-        console.log('Empty search query, resetting search results');
-        setSearchResults([]);
-        setIsSearching(false);
-        setInitialLoading(false); // Ensure initialLoading is reset
-        return;
-      }
+const performSearch = useCallback(
+  async (query: string) => {
+    if (!query.trim()) {
+      console.log('Empty search query, resetting search results');
+      setSearchResults([]);
+      setIsSearching(false);
+      setInitialLoading(false);
+      setError('');
+      return;
+    }
 
-      const accessToken = localStorage.getItem('accessToken');
-      if (!accessToken) {
-        setError('Please log in to search files');
-        setIsSearching(false);
-        setInitialLoading(false);
-        return;
-      }
+    const accessToken = localStorage.getItem('accessToken');
+    if (!accessToken) {
+      setError('Please log in to search files');
+      setIsSearching(false);
+      setInitialLoading(false);
+      return;
+    }
 
-      setIsSearching(true);
-      try {
-        const results = await Promise.race([searchFilesRecursively(null, query, accessToken), timeout(15000)]) as SearchItem[];
-        console.log('Search completed with results:', results);
-        setSearchResults(results as SearchItem[]);
-        setError('');
-      } catch (error) {
-        const err = error as AxiosError<ApiErrorResponse>;
-        console.error('Search error:', err);
-        if (err.response?.status === 401) {
-          try {
-            const newAccessToken = await Promise.race([
-              refreshAccessToken(localStorage.getItem('refreshToken') || ''),
-              timeout(10000),
-            ]);
-            localStorage.setItem('accessToken', String(newAccessToken));
-            const results = await Promise.race([searchFilesRecursively(null, query, String(newAccessToken)), timeout(15000)]);
-            console.log('Search completed after token refresh:', results);
-            setSearchResults(results as SearchItem[]);
-            setError('');
-          } catch (refreshErr) {
-            const refreshError = refreshErr as ApiError;
-            setError(refreshError.response?.data?.message || 'Session expired. Please log in again.');
+    setIsSearching(true);
+    try {
+      const results = await Promise.race([
+        searchFilesRecursively(null, query, accessToken),
+        timeout(15000),
+      ]) as SearchItem[];
+      console.log('Search completed with results:', results);
+      setSearchResults(results);
+      setError('');
+    } catch (error) {
+      const err = error as AxiosError<ApiErrorResponse>;
+      console.error('Search error:', err);
+      if (err.response?.status === 401) {
+        try {
+          const newAccessToken = await Promise.race([
+            refreshAccessToken(localStorage.getItem('refreshToken') || ''),
+            timeout(10000),
+          ]);
+          localStorage.setItem('accessToken', String(newAccessToken));
+          const results = await Promise.race([
+            searchFilesRecursively(null, query, String(newAccessToken)),
+            timeout(15000),
+          ]);
+          console.log('Search completed after token refresh:', results);
+          setSearchResults(results as SearchItem[]);
+          setError('');
+        } catch (refreshErr) {
+          const refreshError = refreshErr as ApiError;
+          setError(refreshError.response?.data?.message || 'Session expired. Please log in again.');
+        }
+      } else {
+        setError(err.message || 'Failed to search files. Please try again.');
+      }
+    } finally {
+      setIsSearching(false);
+      setInitialLoading(false); // Always reset initialLoading
+    }
+  },
+  [searchFilesRecursively]
+);
+
+const fetchFilesList = useCallback(
+  async (pageNum: number) => {
+    const accessToken = localStorage.getItem('accessToken');
+    if (!accessToken) {
+      setError('Please log in to view files');
+      setInitialLoading(false);
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const data = await Promise.race([
+        fetchFiles(accessToken, currentFolderId, pageNum, 20, fileTypeFilter),
+        timeout(10000),
+      ]) as (File | TypeFolder)[];
+      console.log(`Fetched files for page ${pageNum}:`, data);
+      if (pageNum === 1) {
+        setAllFiles(data);
+      } else {
+        setAllFiles((prev) => [...prev, ...data]);
+      }
+      setHasMore(data.length === 20);
+
+      const folders = data.filter((item) => !('contentType' in item)) as TypeFolder[];
+      for (const folder of folders) {
+        if (!folderSizes[folder._id]) {
+          await fetchFolderSize(folder._id, accessToken);
+        }
+      }
+      setError(''); // Clear any previous errors
+    } catch (error) {
+      const err = error as AxiosError<ApiErrorResponse>;
+      console.error('Fetch files error:', err);
+      if (err.response?.status === 401) {
+        try {
+          const newAccessToken = await Promise.race([
+            refreshAccessToken(localStorage.getItem('refreshToken') || ''),
+            timeout(10000),
+          ]);
+          localStorage.setItem('accessToken', String(newAccessToken));
+          const data = await Promise.race([
+            fetchFiles(String(newAccessToken), currentFolderId, pageNum, 20, fileTypeFilter),
+            timeout(10000),
+          ]) as (File | TypeFolder)[];
+          if (pageNum === 1) {
+            setAllFiles(data);
+          } else {
+            setAllFiles((prev) => [...prev, ...data]);
           }
-        } else {
-          setError(err.message || 'Failed to search files');
-        }
-      } finally {
-        setIsSearching(false);
-        setInitialLoading(false); // Ensure initialLoading is reset
-      }
-    },
-    [searchFilesRecursively]
-  );
+          setHasMore(data.length === 20);
 
-  const fetchFilesList = useCallback(
-    async (pageNum: number) => {
-      const accessToken = localStorage.getItem('accessToken');
-      if (!accessToken) {
-        setError('Please log in to view files');
-        setInitialLoading(false);
-        setIsLoading(false);
-        return;
-      }
-
-      setIsLoading(true);
-      try {
-        const data = await Promise.race([fetchFiles(accessToken, currentFolderId, pageNum, 20, fileTypeFilter), timeout(10000)]) as (File | TypeFolder)[];
-        console.log(`Fetched files for page ${pageNum}:`, data);
-        if (pageNum === 1) {
-          setAllFiles(data as (File | TypeFolder)[]);
-        } else {
-          setAllFiles((prev) => [...prev, ...(data as (File | TypeFolder)[])]);
-        }
-        setHasMore((data as (File | TypeFolder)[]).length === 20);
-
-        const folders = data.filter((item) => !('contentType' in item)) as TypeFolder[];
-        for (const folder of folders) {
-          if (!folderSizes[folder._id]) {
-            await fetchFolderSize(folder._id, accessToken);
-          }
-        }
-      } catch (error) {
-        const err = error as AxiosError<ApiErrorResponse>;
-        console.error('Fetch files error:', err);
-        if (err.response?.status === 401) {
-          try {
-            const newAccessToken = await Promise.race([
-              refreshAccessToken(localStorage.getItem('refreshToken') || ''),
-              timeout(10000),
-            ]);
-            localStorage.setItem('accessToken', String(newAccessToken));
-            const data = await Promise.race([
-              fetchFiles(String(newAccessToken), currentFolderId, pageNum, 20, fileTypeFilter),
-              timeout(10000),
-            ]);
-            if (pageNum === 1) {
-              setAllFiles(data as (File | TypeFolder)[]);
-            } else {
-              setAllFiles((prev) => [...prev, ...(data as (File | TypeFolder)[])]);
+          const folders = data.filter((item) => !('contentType' in item)) as TypeFolder[];
+          for (const folder of folders) {
+            if (!folderSizes[folder._id]) {
+              await fetchFolderSize(folder._id, String(newAccessToken));
             }
-            const typedData = data as (File | TypeFolder)[];
-            setHasMore(typedData.length === 20);
-
-            const folders = typedData.filter((item) => !('contentType' in item)) as TypeFolder[];
-            for (const folder of folders) {
-              if (!folderSizes[folder._id]) {
-                await fetchFolderSize(folder._id, String(newAccessToken));
-              }
-            }
-          } catch (refreshErr) {
-            const refreshError = refreshErr as ApiError;
-            setError(refreshError.response?.data?.message || 'Session expired. Please log in again.');
           }
-        } else {
-          setError(err.message || 'Failed to fetch files');
+          setError('');
+        } catch (refreshErr) {
+          const refreshError = refreshErr as ApiError;
+          setError(refreshError.response?.data?.message || 'Session expired. Please log in again.');
         }
-      } finally {
-        setIsLoading(false);
-        setInitialLoading(false);
+      } else {
+        setError(err.response?.data?.message || 'Failed to fetch files. Please try again.');
       }
-    },
-    [currentFolderId, fetchFolderSize, folderSizes, fileTypeFilter]
-  );
+    } finally {
+      setIsLoading(false);
+      setInitialLoading(false); // Always reset initialLoading
+    }
+  },
+  [currentFolderId, fetchFolderSize, folderSizes, fileTypeFilter]
+);
 
   const debouncedFetchFilesList = useMemo(
     () => debounce((pageNum: number) => fetchFilesList(pageNum), 300),
     [fetchFilesList]
   );
 
-  useEffect(() => {
-    console.log('useEffect triggered with searchQuery:', searchQuery, 'fileTypeFilter:', fileTypeFilter, 'currentFolderId:', currentFolderId);
-    setInitialLoading(true);
-    setError('');
-    setPage(1);
-    setAllFiles([]);
-    setFiles([]);
-    setSearchResults([]);
+useEffect(() => {
+  console.log('useEffect triggered with searchQuery:', searchQuery, 'fileTypeFilter:', fileTypeFilter, 'currentFolderId:', currentFolderId);
+  setInitialLoading(true);
+  setError('');
+  setPage(1);
+  setAllFiles([]);
+  setFiles([]);
+  setSearchResults([]);
+  setHasMore(true); // Reset hasMore to ensure pagination works
 
-    if (searchQuery.trim()) {
-      performSearch(searchQuery);
-    } else {
-      fetchFilesList(1);
-    }
+  if (searchQuery.trim()) {
+    performSearch(searchQuery);
+  } else {
+    fetchFilesList(1);
+  }
 
-    return () => {
-      debouncedFetchFilesList.cancel();
-    };
-  }, [currentFolderId, fileTypeFilter, searchQuery, performSearch, fetchFilesList, debouncedFetchFilesList]);
+  return () => {
+    debouncedFetchFilesList.cancel();
+  };
+}, [currentFolderId, fileTypeFilter, searchQuery, performSearch, fetchFilesList, debouncedFetchFilesList]);
 
   useEffect(() => {
     if (inView && hasMore && !isLoading && !searchQuery.trim()) {
